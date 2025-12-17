@@ -1,3 +1,4 @@
+
 /**
  * @license
  * SPDX-License-Identifier: Apache-2.0
@@ -12,15 +13,10 @@ declare global {
 }
 
 export const defineSystemPrompt = () => {
+  // Shorter, punchier prompts are better for the experimental music engine
   window.systemPrompt =
-    "You are an expert music director and composer. Analyze the visual scene to create a sonic identity. Generate 3 highly distinct, high-fidelity music generation prompts (4-6 words each). Focus on: Genre (Specific), Instrumentation (Key elements), Tempo/Rhythm (BPM, Feel), and Atmosphere. Avoid generic terms. Example: 'Cinematic swelling strings, 80bpm, minor key', 'Upbeat neo-soul, rhodes piano, funky bass', 'Cyberpunk synthwave, driving arpeggios, neon textures'.";
+    "You are a music curator. Analyze the scene and output 3 distinct musical 'vibes' as JSON. Each vibe must be 3-5 keywords only. Include Style, Main Instrument, and BPM. Example: 'Lo-fi, Piano, 80bpm', 'Techno, Acid Synth, 130bpm', 'Ambient, Orchestral, 60bpm'. Keep it minimal and atmospheric.";
 
   if (!isLocal) return;
-  console.log("\n");
-  console.log("%cCurrent systemPrompt:", "text-decoration: underline");
-  console.log(window.systemPrompt);
-  console.log("\n");
-  console.log("%cOverwrite with:", "text-decoration: underline");
-  console.log("%csystemPrompt = 'My new system prompt';", "font-weight: bold");
-  console.log("\n");
+  console.log("\nSonar System Prompt Initialized.");
 };

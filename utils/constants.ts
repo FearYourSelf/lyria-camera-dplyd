@@ -9,7 +9,8 @@ import { urlargs } from "./urlargs";
 
 export const MAX_CAPTURE_DIM = 256;
 export const IMAGE_MIME_TYPE = "image/png";
-export const GEMINI_MODEL = "gemini-3-flash-preview";
+// Using 2.5 Flash for its extreme stability and generous rate limits
+export const GEMINI_MODEL = "gemini-2.5-flash-latest";
 
 export const INTERVAL_PRESETS: IntervalPreset[] = [
   {
