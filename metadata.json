@@ -1,0 +1,9 @@
+
+{
+  "name": "Sonar",
+  "description": "Sonar turns your surroundings into a living symphony. Immersive real-time music generation based on visual inputs.",
+  "requestFramePermissions": [
+    "display-capture",
+    "camera"
+  ]
+}
