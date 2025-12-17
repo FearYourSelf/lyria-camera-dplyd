@@ -82,11 +82,16 @@ export class LyriaCamera extends LitElement {
 
   @state() private newPromptText: string = "";
 
+  // Debug Console States
+  @state() private debugConsoleOpen = false;
+  @state() private debugLogs: { type: 'log' | 'warn' | 'error', text: string }[] = [];
+
   @query("video") private videoElement!: HTMLVideoElement;
   @query("img#uploaded-image-el") private uploadedImageElement!: HTMLImageElement;
   @query("toast-message") private toastMessageElement!: ToastMessage;
   @query("#file-input") private fileInput!: HTMLInputElement;
   @query("canvas#visualizer") private visualizerCanvas!: HTMLCanvasElement;
+  @query(".debug-console") private debugConsoleEl?: HTMLElement;
 
   private canvasElement: HTMLCanvasElement = document.createElement("canvas");
 
@@ -105,8 +110,8 @@ export class LyriaCamera extends LitElement {
 
   async connectedCallback() {
     super.connectedCallback();
+    this.setupDebugConsole();
     this.ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
-    // Fix: Use the full prefixed model name and pass the key directly
     this.liveMusicHelper = new LiveMusicHelper(process.env.API_KEY, "models/lyria-realtime-exp");
 
     this.liveMusicHelper.addEventListener(
@@ -122,6 +127,8 @@ export class LyriaCamera extends LitElement {
 
     this.supportsScreenShare = !!navigator.mediaDevices?.getDisplayMedia;
     void this.updateCameraCapabilities();
+
+    window.addEventListener('keydown', this.handleGlobalKeydown);
   }
 
   disconnectedCallback() {
@@ -131,6 +138,51 @@ export class LyriaCamera extends LitElement {
     this.stopVisualizer();
     this.stopRecording();
     if (this.uiAudioCtx) this.uiAudioCtx.close();
+    window.removeEventListener('keydown', this.handleGlobalKeydown);
+  }
+
+  private handleGlobalKeydown = (e: KeyboardEvent) => {
+    // CTRL + ' (Quote) shortcut
+    if (e.ctrlKey && e.key === "'") {
+      this.debugConsoleOpen = !this.debugConsoleOpen;
+      if (this.debugConsoleOpen) {
+        setTimeout(() => {
+          if (this.debugConsoleEl) {
+            this.debugConsoleEl.scrollTop = this.debugConsoleEl.scrollHeight;
+          }
+        }, 50);
+      }
+    }
+  };
+
+  private setupDebugConsole() {
+    const originalLog = console.log;
+    const originalWarn = console.warn;
+    const originalError = console.error;
+
+    console.log = (...args: any[]) => {
+      this.pushDebugLog('log', args.join(' '));
+      originalLog.apply(console, args);
+    };
+    console.warn = (...args: any[]) => {
+      this.pushDebugLog('warn', args.join(' '));
+      originalWarn.apply(console, args);
+    };
+    console.error = (...args: any[]) => {
+      this.pushDebugLog('error', args.join(' '));
+      originalError.apply(console, args);
+    };
+  }
+
+  private pushDebugLog(type: 'log' | 'warn' | 'error', text: string) {
+    this.debugLogs = [...this.debugLogs, { type, text }].slice(-50); // Keep last 50
+    if (this.debugConsoleOpen) {
+      setTimeout(() => {
+        if (this.debugConsoleEl) {
+          this.debugConsoleEl.scrollTop = this.debugConsoleEl.scrollHeight;
+        }
+      }, 10);
+    }
   }
 
   private stopCurrentStream() {
@@ -273,6 +325,7 @@ export class LyriaCamera extends LitElement {
         this.startCrossfade(json.prompts);
       }
     } catch (e) {
+      console.error("AI Analysis Error:", e);
       this.dispatchError("AI analysis failed.");
     } finally {
       this.promptsLoading = false;
@@ -474,16 +527,24 @@ export class LyriaCamera extends LitElement {
   render() {
     const t = getT(this.language);
     return html`
-      <div id="video-container">
-        ${this.currentSource === "image" ? html`<img id="uploaded-image-el" src=${this.uploadedImageSrc!} />` : html`<video playsinline muted style=${styleMap({transform: this.isVideoFlipped ? "scaleX(-1)" : "none"})}></video>`}
+      <div id="video-container" aria-hidden="true">
+        ${this.currentSource === "image" ? html`<img id="uploaded-image-el" alt="Uploaded source" src=${this.uploadedImageSrc!} />` : html`<video playsinline muted style=${styleMap({transform: this.isVideoFlipped ? "scaleX(-1)" : "none"})}></video>`}
       </div>
-      <canvas id="visualizer"></canvas>
-      <div id="ui-layer">
+      <canvas id="visualizer" aria-hidden="true"></canvas>
+      <div id="ui-layer" role="main">
         ${this.renderPage(t)}
         ${this.settingsOpen ? this.renderSettings(t) : nothing}
       </div>
-      <toast-message></toast-message>
-      <input type="file" id="file-input" hidden @change=${this.handleFileChange} accept="image/*" />
+      <toast-message aria-live="polite"></toast-message>
+      <input type="file" id="file-input" hidden @change=${this.handleFileChange} accept="image/*" aria-hidden="true" />
+      
+      ${this.debugConsoleOpen ? html`
+        <div class="debug-console" role="log" aria-label="Debug logs">
+          ${this.debugLogs.map(log => html`
+            <div class="debug-line ${log.type}">${log.type.toUpperCase()}: ${log.text}</div>
+          `)}
+        </div>
+      ` : nothing}
     `;
   }
 
@@ -496,20 +557,20 @@ export class LyriaCamera extends LitElement {
   private renderSplash(t: any) {
     return html`
       <div class="splash-page">
-        <div class="splash-background"></div>
-        <h1 class="logo-title">${t.logo}<span class="thin">.</span></h1>
+        <div class="splash-background" aria-hidden="true"></div>
+        <h1 class="logo-title">${t.logo}<span class="thin" aria-hidden="true">.</span></h1>
         <p class="subtitle">${t.subtitle}</p>
-        <div class="source-grid">
-          <button class="source-card" @click=${this.setupCamera}>
-            <span class="material-icons-round card-icon">videocam</span>
+        <div class="source-grid" role="group" aria-label="Select source">
+          <button class="source-card" @click=${this.setupCamera} aria-label="${t.camera}">
+            <span class="material-icons-round card-icon" aria-hidden="true">videocam</span>
             <span class="card-label">${t.camera}</span>
           </button>
-          <button class="source-card" @click=${this.setupScreenShare}>
-            <span class="material-icons-round card-icon">screen_share</span>
+          <button class="source-card" @click=${this.setupScreenShare} aria-label="${t.screen}">
+            <span class="material-icons-round card-icon" aria-hidden="true">screen_share</span>
             <span class="card-label">${t.screen}</span>
           </button>
-          <button class="source-card" @click=${this.triggerImageUpload}>
-            <span class="material-icons-round card-icon">image</span>
+          <button class="source-card" @click=${this.triggerImageUpload} aria-label="${t.image}">
+            <span class="material-icons-round card-icon" aria-hidden="true">image</span>
             <span class="card-label">${t.image}</span>
           </button>
         </div>
@@ -519,10 +580,10 @@ export class LyriaCamera extends LitElement {
 
   private renderPreview(t: any) {
     return html`
-      <div class="sheet glass">
-        <div class="sheet-header"><h3>${t.confirmIdentity}</h3></div>
+      <div class="sheet glass" role="dialog" aria-labelledby="preview-heading">
+        <div class="sheet-header"><h3 id="preview-heading">${t.confirmIdentity}</h3></div>
         <div class="preview-image-container">
-          <img src=${this.imagePreviewSrc!} />
+          <img src=${this.imagePreviewSrc!} alt="Preview of uploaded image" />
         </div>
         <div class="preview-actions">
           <button class="btn-cancel" @click=${this.cancelImageUpload}>${t.cancel}</button>
@@ -535,57 +596,57 @@ export class LyriaCamera extends LitElement {
   private renderMain(t: any) {
     return html`
       <div class="top-bar">
-        <button class="icon-button" @click=${this.resetSession}><span class="material-icons-round">arrow_back</span></button>
-        ${this.currentSource === "camera" && this.hasMultipleCameras ? html`<button class="icon-button" @click=${this.switchCamera}><span class="material-icons-round">flip_camera_android</span></button>` : nothing}
-        <button class="create-song-pill glass" @click=${() => this.exportOpen = true}>
-           <span class="material-icons-round" style="opacity: 0.6">auto_fix_high</span>
+        <button class="icon-button" @click=${this.resetSession} aria-label="Go back to splash screen"><span class="material-icons-round" aria-hidden="true">arrow_back</span></button>
+        ${this.currentSource === "camera" && this.hasMultipleCameras ? html`<button class="icon-button" @click=${this.switchCamera} aria-label="Switch camera"><span class="material-icons-round" aria-hidden="true">flip_camera_android</span></button>` : nothing}
+        <button class="create-song-pill glass" @click=${() => this.exportOpen = true} aria-label="${t.createSong}">
+           <span class="material-icons-round" style="opacity: 0.6" aria-hidden="true">auto_fix_high</span>
            <span>${t.createSong}</span>
         </button>
-        <button class="icon-button" @click=${() => this.settingsOpen = true}><span class="material-icons-round">tune</span></button>
+        <button class="icon-button" @click=${() => this.settingsOpen = true} aria-label="Open settings"><span class="material-icons-round" aria-hidden="true">tune</span></button>
       </div>
 
-      <div id="prompts-container">
+      <div id="prompts-container" role="list" aria-label="Active musical prompts">
         <div class="prompts-actions" style="display:flex; justify-content:flex-end; padding: 0.5rem 0;">
-           <button class="icon-button" @click=${() => this.captureAndGenerate()} style="width:36px; height:36px;"><span class="material-icons-round" style="font-size:18px;">refresh</span></button>
+           <button class="icon-button" @click=${() => this.captureAndGenerate()} style="width:36px; height:36px;" aria-label="${t.refresh}"><span class="material-icons-round" style="font-size:18px;" aria-hidden="true">refresh</span></button>
         </div>
         ${this.prompts.map((p, i) => html`
-          <div class="prompt-tag">
+          <div class="prompt-tag" role="listitem">
             <div class="prompt-header" style="display:flex; justify-content:space-between; align-items:flex-start;">
               <span class="prompt-text">${p.text}</span>
-              <span class="material-icons-round delete-btn" style="font-size:18px;" @click=${() => this.deletePrompt(i)}>close</span>
+              <button class="material-icons-round delete-btn" style="font-size:18px;" @click=${() => this.deletePrompt(i)} aria-label="Delete prompt: ${p.text}">close</button>
             </div>
             <div class="weight-slider-container">
-               <input type="range" class="weight-slider" min="0" max="1" step="0.01" .value=${p.weight.toString()} @input=${(e:any) => this.updatePromptWeight(i, +e.target.value)} />
+               <input type="range" class="weight-slider" min="0" max="1" step="0.01" .value=${p.weight.toString()} @input=${(e:any) => this.updatePromptWeight(i, +e.target.value)} aria-label="Weight for prompt: ${p.text}" />
             </div>
           </div>
         `)}
         <div class="add-prompt-box">
-          <input class="add-input glass" placeholder="${t.addVibe}" .value=${this.newPromptText} @input=${(e:any)=>this.newPromptText=e.target.value} @keydown=${(e:any)=>e.key==='Enter' && this.addPrompt()} />
-          <button class="icon-button" @click=${this.addPrompt}><span class="material-icons-round">add</span></button>
+          <input class="add-input glass" placeholder="${t.addVibe}" .value=${this.newPromptText} @input=${(e:any)=>this.newPromptText=e.target.value} @keydown=${(e:any)=>e.key==='Enter' && this.addPrompt()} aria-label="${t.addVibe}" />
+          <button class="icon-button" @click=${this.addPrompt} aria-label="Add new prompt"><span class="material-icons-round" aria-hidden="true">add</span></button>
         </div>
       </div>
 
-      <div id="pip-container" class=${classMap({visible: !!this.lastCapturedImage})}>
-        <img src=${this.lastCapturedImage!} />
+      <div id="pip-container" class=${classMap({visible: !!this.lastCapturedImage})} aria-hidden="true">
+        <img src=${this.lastCapturedImage!} alt="Last analyzed frame" />
       </div>
 
       <div id="controls-container">
-        <div class="status-pill">${this.getStatusText(t)}</div>
+        <div class="status-pill" role="status" aria-live="polite">${this.getStatusText(t)}</div>
         <div class="main-playback">
-          <button class="icon-button" @click=${() => this.isRecording ? this.stopRecording() : this.startRecording()} style=${styleMap({color: this.isRecording ? '#ff453a' : 'white'})}>
-            <span class="material-icons-round">${this.isRecording ? 'stop' : 'fiber_manual_record'}</span>
+          <button class="icon-button" @click=${() => this.isRecording ? this.stopRecording() : this.startRecording()} style=${styleMap({color: this.isRecording ? '#ff453a' : 'white'})} aria-label="${this.isRecording ? 'Stop recording' : 'Start recording'}">
+            <span class="material-icons-round" aria-hidden="true">${this.isRecording ? 'stop' : 'fiber_manual_record'}</span>
           </button>
-          <button class="play-btn ${this.appState !== 'idle' ? 'playing' : ''}" @click=${this.handlePlayPause}>
-            <span class="material-icons-round" style="font-size: 36px;">${this.appState !== 'idle' ? 'pause' : 'play_arrow'}</span>
+          <button class="play-btn ${this.appState !== 'idle' ? 'playing' : ''}" @click=${this.handlePlayPause} aria-label="${this.appState !== 'idle' ? 'Pause symphony' : 'Play symphony'}">
+            <span class="material-icons-round" style="font-size: 36px;" aria-hidden="true">${this.appState !== 'idle' ? 'pause' : 'play_arrow'}</span>
           </button>
-          <button class="icon-button" @click=${() => this.captureAndGenerate()}>
-            <span class="material-icons-round">camera</span>
+          <button class="icon-button" @click=${() => this.captureAndGenerate()} aria-label="Capture and analyze manually">
+            <span class="material-icons-round" aria-hidden="true">camera</span>
           </button>
         </div>
-        <div class="volume-bar">
-          <span class="material-icons-round" style="font-size:14px; opacity:0.4;">volume_down</span>
-          <input type="range" class="weight-slider" min="0" max="1" step="0.01" .value=${this.volume.toString()} @input=${(e:any) => { this.volume = +e.target.value; this.liveMusicHelper.setVolume(this.volume); }} />
-          <span class="material-icons-round" style="font-size:14px; opacity:0.4;">volume_up</span>
+        <div class="volume-bar" role="group" aria-label="Volume control">
+          <span class="material-icons-round" style="font-size:14px; opacity:0.4;" aria-hidden="true">volume_down</span>
+          <input type="range" class="weight-slider" min="0" max="1" step="0.01" .value=${this.volume.toString()} @input=${(e:any) => { this.volume = +e.target.value; this.liveMusicHelper.setVolume(this.volume); }} aria-label="Volume level" />
+          <span class="material-icons-round" style="font-size:14px; opacity:0.4;" aria-hidden="true">volume_up</span>
         </div>
       </div>
     `;
@@ -600,26 +661,26 @@ export class LyriaCamera extends LitElement {
 
   private renderSettings(t: any) {
     return html`
-      <div class="sheet glass">
-        <div class="sheet-header"><h3>${t.engineTuning}</h3><span class="material-icons-round" @click=${() => this.settingsOpen = false} style="cursor:pointer; opacity:0.5;">close</span></div>
-        <div class="preset-grid">
+      <div class="sheet glass" role="dialog" aria-labelledby="settings-heading">
+        <div class="sheet-header"><h3 id="settings-heading">${t.engineTuning}</h3><button class="material-icons-round" @click=${() => this.settingsOpen = false} style="cursor:pointer; opacity:0.5; background:none; border:none; color:inherit;" aria-label="Close settings">close</button></div>
+        <div class="preset-grid" role="group" aria-label="Analysis interval presets">
           ${INTERVAL_PRESETS.map(p => html`
-            <div class="preset-card ${this.intervalPreset.labelSub === p.labelSub ? 'active' : ''}" @click=${() => { this.intervalPreset = p; this.startTimer(); this.settingsOpen = false; }}>
+            <button class="preset-card ${this.intervalPreset.labelSub === p.labelSub ? 'active' : ''}" @click=${() => { this.intervalPreset = p; this.startTimer(); this.settingsOpen = false; }} aria-pressed="${this.intervalPreset.labelSub === p.labelSub}">
               <h4>${p.labelSub === 'INFINITE' ? t.infinite : p.labelSub}</h4>
               <p>${p.labelValue === '∞' ? t.staticMood : `${t.analyzeEvery} ${p.labelValue}`}</p>
-            </div>
+            </button>
           `)}
         </div>
         <div style="margin-top: 1.5rem;">
-            <label style="font-size: 10px; opacity:0.4; text-transform:uppercase; font-weight:800; letter-spacing:0.1em;">${t.transitionSmoothness} (${this.intervalPreset.crossfadeSeconds}s)</label>
-            <input type="range" class="weight-slider" style="width:100%; margin-top:0.75rem;" min="0" max="25" .value=${this.intervalPreset.crossfadeSeconds.toString()} @input=${(e:any) => this.intervalPreset = {...this.intervalPreset, crossfadeSeconds: +e.target.value}} />
+            <label id="smoothness-label" style="font-size: 10px; opacity:0.4; text-transform:uppercase; font-weight:800; letter-spacing:0.1em;">${t.transitionSmoothness} (${this.intervalPreset.crossfadeSeconds}s)</label>
+            <input type="range" class="weight-slider" style="width:100%; margin-top:0.75rem;" min="0" max="25" .value=${this.intervalPreset.crossfadeSeconds.toString()} @input=${(e:any) => this.intervalPreset = {...this.intervalPreset, crossfadeSeconds: +e.target.value}} aria-labelledby="smoothness-label" />
         </div>
         
         <div style="margin-top: 2rem;">
-            <label style="font-size: 10px; opacity:0.4; text-transform:uppercase; font-weight:800; letter-spacing:0.1em;">${t.language}</label>
-            <div class="language-toggle">
-                <button class="lang-btn ${this.language === 'en' ? 'active' : ''}" @click=${() => this.language = 'en'}>English</button>
-                <button class="lang-btn ${this.language === 'pt' ? 'active' : ''}" @click=${() => this.language = 'pt'}>Português</button>
+            <label id="language-label" style="font-size: 10px; opacity:0.4; text-transform:uppercase; font-weight:800; letter-spacing:0.1em;">${t.language}</label>
+            <div class="language-toggle" role="group" aria-labelledby="language-label">
+                <button class="lang-btn ${this.language === 'en' ? 'active' : ''}" @click=${() => this.language = 'en'} aria-pressed="${this.language === 'en'}">English</button>
+                <button class="lang-btn ${this.language === 'pt' ? 'active' : ''}" @click=${() => this.language = 'pt'} aria-pressed="${this.language === 'pt'}">Português</button>
             </div>
         </div>
       </div>

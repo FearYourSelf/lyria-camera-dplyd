@@ -20,6 +20,13 @@ export default css`
     -webkit-tap-highlight-color: transparent;
   }
 
+  /* --- ACCESSIBILITY FOCUS --- */
+  button:focus-visible, 
+  input:focus-visible {
+    outline: 2px solid #fff;
+    outline-offset: 2px;
+  }
+
   /* --- LIQUID GLASS BASE --- */
   .glass {
     background: rgba(255, 255, 255, 0.05);
@@ -147,6 +154,7 @@ export default css`
     transition: all 0.4s cubic-bezier(0.165, 0.84, 0.44, 1);
     color: white;
     backdrop-filter: blur(10px);
+    border: none;
   }
   .source-card:hover {
     background: rgba(255, 255, 255, 0.1);
@@ -178,6 +186,7 @@ export default css`
     color: white;
     cursor: pointer;
     transition: all 0.25s ease;
+    border: none;
   }
   .icon-button:active { transform: scale(0.92); background: rgba(255, 255, 255, 0.15); }
   .icon-button.primary { background: white; color: black; border: none; }
@@ -196,6 +205,7 @@ export default css`
     letter-spacing: 0.08em;
     cursor: pointer;
     color: white;
+    border: none;
   }
 
   /* --- PROMPT LIST --- */
@@ -226,7 +236,7 @@ export default css`
   @keyframes slideUp { from { opacity: 0; transform: translateY(15px); } to { opacity: 1; transform: translateY(0); } }
 
   .prompt-text { font-size: 0.9rem; font-weight: 400; line-height: 1.5; opacity: 0.9; }
-  .delete-btn { opacity: 0.3; cursor: pointer; transition: opacity 0.2s; }
+  .delete-btn { opacity: 0.3; cursor: pointer; transition: opacity 0.2s; background: none; border: none; padding: 4px; color: inherit; }
   .delete-btn:hover { opacity: 1; color: #ff4d4d; }
 
   .weight-slider-container { display: flex; align-items: center; }
@@ -357,6 +367,9 @@ export default css`
     cursor: pointer;
     border: 1px solid rgba(255, 255, 255, 0.05);
     transition: 0.25s;
+    text-align: left;
+    width: 100%;
+    display: block;
   }
   .preset-card.active { border-color: rgba(255, 255, 255, 0.3); background: rgba(255, 255, 255, 0.08); }
   .preset-card h4 { margin: 0; font-size: 0.85rem; color: #fff; text-transform: uppercase; letter-spacing: 0.1em; }
@@ -451,6 +464,37 @@ export default css`
   }
   #pip-container.visible { opacity: 1; transform: translateY(0); }
   #pip-container img { width: 100%; height: 100%; object-fit: cover; opacity: 0.8; }
+
+  /* --- DEBUG CONSOLE --- */
+  .debug-console {
+    position: fixed;
+    bottom: 0;
+    left: 0;
+    right: 0;
+    height: 35dvh;
+    background: rgba(0, 0, 0, 0.85);
+    backdrop-filter: blur(20px);
+    z-index: 10000;
+    font-family: 'Fira Code', 'Courier New', monospace;
+    font-size: 11px;
+    padding: 1rem;
+    overflow-y: auto;
+    border-top: 1px solid rgba(255, 255, 255, 0.2);
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    pointer-events: auto;
+    box-shadow: 0 -10px 30px rgba(0,0,0,0.5);
+  }
+  .debug-line {
+    border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+    padding: 2px 0;
+    word-break: break-all;
+    white-space: pre-wrap;
+  }
+  .debug-line.error { color: #ff4d4d; }
+  .debug-line.warn { color: #ffcc00; }
+  .debug-line.log { color: #00ffcc; }
 
   @media (min-width: 768px) {
     .source-grid { max-width: 500px; gap: 1.5rem; }
