@@ -30,6 +30,21 @@ export const translations = {
     language: "Language",
     addVibe: "Add vibe...",
     refresh: "Refresh",
+    savedEchoes: "Saved Echoes",
+    // Tooltips
+    backTooltip: "Back to home",
+    switchCameraTooltip: "Switch camera",
+    createSongTooltip: "Export a high-fidelity render",
+    settingsTooltip: "Tune engine & view Echoes",
+    refreshTooltip: "Generate new vibe from current view",
+    deletePromptTooltip: "Remove this vibe",
+    addPromptTooltip: "Add your own musical vibe",
+    recordTooltip: "Record the audio stream",
+    stopRecordTooltip: "Stop recording and save",
+    playTooltip: "Start the symphony",
+    pauseTooltip: "Pause the symphony",
+    captureTooltip: "Manual snapshot and analysis",
+    closeTooltip: "Close",
   },
   pt: {
     logo: "Sonar",
@@ -54,6 +69,21 @@ export const translations = {
     language: "Idioma",
     addVibe: "Adicionar vibe...",
     refresh: "Atualizar",
+    savedEchoes: "Ecos Salvos",
+    // Tooltips
+    backTooltip: "Voltar ao início",
+    switchCameraTooltip: "Trocar câmera",
+    createSongTooltip: "Exportar renderização de alta fidelidade",
+    settingsTooltip: "Ajustar motor e ver Ecos",
+    refreshTooltip: "Gerar nova vibe da visão atual",
+    deletePromptTooltip: "Remover esta vibe",
+    addPromptTooltip: "Adicionar sua própria vibe musical",
+    recordTooltip: "Gravar o fluxo de áudio",
+    stopRecordTooltip: "Parar gravação e salvar",
+    playTooltip: "Iniciar a sinfonia",
+    pauseTooltip: "Pausar a sinfonia",
+    captureTooltip: "Captura manual e análise",
+    closeTooltip: "Fechar",
   }
 };
 
