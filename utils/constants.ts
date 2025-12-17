@@ -9,7 +9,7 @@ import { urlargs } from "./urlargs";
 
 export const MAX_CAPTURE_DIM = 256;
 export const IMAGE_MIME_TYPE = "image/png";
-export const GEMINI_MODEL = "gemini-3-pro-preview";
+export const GEMINI_MODEL = "gemini-3-flash-preview";
 
 export const INTERVAL_PRESETS: IntervalPreset[] = [
   {

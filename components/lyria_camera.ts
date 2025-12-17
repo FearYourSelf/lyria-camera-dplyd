@@ -73,6 +73,7 @@ export class LyriaCamera extends LitElement {
   @state() private prompts: Prompt[] = [];
   @state() private promptsStale = false;
   @state() private promptsLoading = false;
+  @state() private isCoolingDown = false;
 
   @state() private hasAudioChunks = false;
   @state() private supportsScreenShare = false;
@@ -131,6 +132,9 @@ export class LyriaCamera extends LitElement {
 
   private db: IDBDatabase | null = null;
 
+  // Analysis Retry Logic
+  private analysisBackoffFactor = 0;
+
   async connectedCallback() {
     super.connectedCallback();
     this.addLog("Initializing app...", 'info');
@@ -172,10 +176,14 @@ export class LyriaCamera extends LitElement {
   private handleGlobalKeyDown = (e: KeyboardEvent) => {
     if (e.ctrlKey && e.key === "'") {
       e.preventDefault();
-      this.showDebugConsole = !this.showDebugConsole;
-      this.addLog(this.showDebugConsole ? "Debug console opened" : "Debug console closed", 'info');
+      this.toggleDebugConsole();
     }
   };
+
+  private toggleDebugConsole() {
+    this.showDebugConsole = !this.showDebugConsole;
+    this.addLog(this.showDebugConsole ? "Debug console opened" : "Debug console closed", 'info');
+  }
 
   private addLog(message: string, type: 'info' | 'error' | 'warn' = 'info') {
     const log: DebugLog = {
@@ -420,7 +428,10 @@ export class LyriaCamera extends LitElement {
   private startTimer() {
     this.stopTimer();
     if (this.intervalPreset.captureSeconds === 0) return;
-    this.nextCaptureTime = performance.now() + this.intervalPreset.captureSeconds * 1000;
+    
+    // Add extra buffer if we just hit a rate limit
+    const backoffMs = this.analysisBackoffFactor * 5000;
+    this.nextCaptureTime = performance.now() + (this.intervalPreset.captureSeconds * 1000) + backoffMs;
     this.tick();
   }
 
@@ -438,10 +449,11 @@ export class LyriaCamera extends LitElement {
   }
 
   private async captureAndGenerate() {
-    if (this.promptsLoading || this.page === "splash") return;
+    if (this.promptsLoading || this.page === "splash" || this.isCoolingDown) return;
+    
     this.playFeedbackSound('capture');
     this.promptsLoading = true;
-    this.addLog("Analyzing visual scene...", 'info');
+    this.addLog(`Analyzing visual scene using ${GEMINI_MODEL}...`, 'info');
     
     const snapshot = this.getStreamSnapshot();
     if (!snapshot) { 
@@ -453,12 +465,14 @@ export class LyriaCamera extends LitElement {
     
     this.lastCapturedImage = snapshot;
     const base64ImageData = snapshot.split(",")[1];
+    
     try {
       const response = await this.ai.models.generateContent(this.getGenerateContentParams(base64ImageData));
       const json = JSON.parse(response.text!);
       const newPrompts = (json.prompts as string[]).map(text => ({ text, weight: 1.0 }));
       
       this.addLog(`New prompts generated: ${json.prompts.join(' | ')}`, 'info');
+      this.analysisBackoffFactor = 0; // Reset backoff on success
 
       if (this.appState === "pendingStart") {
         this.prompts = newPrompts;
@@ -470,8 +484,23 @@ export class LyriaCamera extends LitElement {
         this.startCrossfade(json.prompts);
       }
     } catch (e: any) {
-      this.addLog(`AI analysis failed: ${e.message}`, 'error');
-      this.dispatchError("AI analysis failed.");
+      const errorMsg = e.message || "";
+      const isRateLimit = errorMsg.includes("429") || errorMsg.includes("Too Many Requests") || errorMsg.includes("rate limit");
+      
+      if (isRateLimit) {
+        this.analysisBackoffFactor = Math.min(this.analysisBackoffFactor + 1, 5);
+        this.isCoolingDown = true;
+        this.addLog(`Rate limit hit on ${GEMINI_MODEL}. Entering cooldown...`, 'warn');
+        this.toastMessageElement.show("AI is resting (Rate Limit). Retrying in a few seconds...", 5000);
+        
+        setTimeout(() => {
+          this.isCoolingDown = false;
+          this.addLog("Cooldown finished.", 'info');
+        }, 8000);
+      } else {
+        this.addLog(`AI analysis failed: ${errorMsg}`, 'error');
+        this.dispatchError("AI analysis failed.");
+      }
     } finally {
       this.promptsLoading = false;
       this.startTimer();
@@ -657,6 +686,7 @@ export class LyriaCamera extends LitElement {
   private hideTooltip() { this.activeTooltip = null; }
 
   private getStatusText(t: any) {
+    if (this.isCoolingDown) return "AI COOLING DOWN...";
     if (this.appState === "idle") return t.ready;
     if (this.appState === "pendingStart") return t.synthesizing;
     if (this.appState === "playing") return t.flowing;
@@ -666,9 +696,10 @@ export class LyriaCamera extends LitElement {
   render() {
     const t = getT(this.language);
     return html`
-      <div id="video-container" aria-hidden="true" class=${classMap({ analyzing: this.promptsLoading })}>
+      <div id="video-container" aria-hidden="true" class=${classMap({ analyzing: this.promptsLoading, cooling: this.isCoolingDown })}>
         ${this.currentSource === "image" ? html`<img id="uploaded-image-el" alt="Uploaded source" src=${this.uploadedImageSrc!} />` : html`<video playsinline muted style=${styleMap({transform: this.isVideoFlipped ? "scaleX(-1)" : "none"})}></video>`}
         ${this.promptsLoading ? html`<div class="analysis-overlay"><div class="scanline"></div><div class="analysis-status">${t.synthesizing}</div></div>` : nothing}
+        ${this.isCoolingDown ? html`<div class="analysis-overlay cooldown"><div class="analysis-status" style="background: #ff453a; color: white;">AI OVERLOAD - COOLING DOWN</div></div>` : nothing}
       </div>
       <canvas id="visualizer" aria-hidden="true"></canvas>
       <div id="ui-layer" role="main">
@@ -679,6 +710,11 @@ export class LyriaCamera extends LitElement {
       <toast-message aria-live="polite"></toast-message>
       <input type="file" id="file-input" hidden @change=${this.handleFileChange} accept="image/*" aria-hidden="true" />
       ${this.activeTooltip ? html`<div class="tooltip-bubble ${this.tooltipSide}" style=${styleMap({ left: `${this.tooltipX}px`, top: `${this.tooltipY}px` })}>${this.activeTooltip}</div>` : nothing}
+      
+      <!-- Persistent Debug Toggle -->
+      <button class="debug-toggle-btn" @click=${this.toggleDebugConsole} aria-label="Toggle Debug Console">
+        <span class="material-icons-round" style="font-size: 16px;">terminal</span>
+      </button>
     `;
   }
 
@@ -692,9 +728,11 @@ export class LyriaCamera extends LitElement {
         </div>
         <div class="debug-body">
           <div class="debug-state">
+            Model: <strong>${GEMINI_MODEL}</strong> |
             Page: <strong>${this.page}</strong> | 
             AppState: <strong>${this.appState}</strong> | 
-            Playback: <strong>${this.playbackState}</strong>
+            Playback: <strong>${this.playbackState}</strong> |
+            Backoff: <strong>${this.analysisBackoffFactor}</strong>
           </div>
           ${this.debugLogs.map(log => html`
             <div class="debug-log-line ${log.type}">
@@ -778,7 +816,7 @@ export class LyriaCamera extends LitElement {
 
       <div id="controls-container">
         ${this.isCapturingVibe ? html`<div class="progress-container mini"><div class="progress-bar-fill" style="width: ${this.captureProgress}%"></div></div>` : nothing}
-        <div class="status-pill" role="status" aria-live="polite">${this.getStatusText(t)}</div>
+        <div class="status-pill" role="status" aria-live="polite" style=${styleMap({color: this.isCoolingDown ? '#ff453a' : 'inherit'})}>${this.getStatusText(t)}</div>
         <div class="main-playback">
           <button class="icon-button" @click=${this.startVibeCapture} @mouseenter=${() => this.showTooltip("Capture 5min Vibe")} @mouseleave=${this.hideTooltip} aria-label="Capture vibe" style=${styleMap({background: this.isCapturingVibe ? 'white' : ''})}>
             <span class="material-icons-round" style=${styleMap({color: this.isCapturingVibe ? 'black' : 'white'})} aria-hidden="true">${this.isCapturingVibe ? 'graphic_eq' : 'bookmark_add'}</span>
@@ -786,7 +824,7 @@ export class LyriaCamera extends LitElement {
           <button class="play-btn ${this.appState !== 'idle' ? 'playing' : ''}" @click=${this.handlePlayPause} @mouseenter=${() => this.showTooltip(this.appState !== 'idle' ? t.pauseTooltip : t.playTooltip)} @mouseleave=${this.hideTooltip}>
             <span class="material-icons-round" style="font-size: 36px;" aria-hidden="true">${this.appState !== 'idle' ? 'pause' : 'play_arrow'}</span>
           </button>
-          <button class="icon-button" @click=${() => this.captureAndGenerate()} @mouseenter=${() => this.showTooltip(t.captureTooltip)} @mouseleave=${this.hideTooltip}>
+          <button class="icon-button" @click=${() => this.captureAndGenerate()} ?disabled=${this.isCoolingDown} @mouseenter=${() => this.showTooltip(this.isCoolingDown ? "AI Cooling Down..." : t.captureTooltip)} @mouseleave=${this.hideTooltip} style=${styleMap({opacity: this.isCoolingDown ? '0.2' : '1'})}>
             <span class="material-icons-round" aria-hidden="true">camera</span>
           </button>
         </div>

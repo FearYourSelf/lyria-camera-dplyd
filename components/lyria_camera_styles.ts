@@ -72,6 +72,11 @@ export default css`
     filter: blur(var(--bass-glow)) brightness(1.2);
   }
 
+  #video-container.cooling video, #video-container.cooling img#uploaded-image-el {
+    opacity: 0.15;
+    filter: grayscale(1) brightness(0.5);
+  }
+
   @keyframes pulseView {
     0%, 100% { transform: scale(1); filter: brightness(1); }
     50% { transform: scale(1.04); filter: brightness(1.3) contrast(1.1); }
@@ -86,6 +91,10 @@ export default css`
     justify-content: center;
     background: radial-gradient(circle, transparent 20%, rgba(255,255,255,0.08) 100%);
     z-index: 5;
+  }
+
+  .analysis-overlay.cooldown {
+    background: rgba(0, 0, 0, 0.6);
   }
 
   .analysis-status {
@@ -354,6 +363,26 @@ export default css`
   .debug-log-line.warn { color: #ffd60a; opacity: 1; }
   .log-ts { opacity: 0.5; flex-shrink: 0; }
   .log-msg { word-break: break-all; }
+
+  .debug-toggle-btn {
+    position: fixed;
+    bottom: 10px;
+    left: 10px;
+    width: 24px;
+    height: 24px;
+    border-radius: 4px;
+    background: rgba(255,255,255,0.05);
+    border: 1px solid rgba(255,255,255,0.1);
+    color: white;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    z-index: 10001;
+    opacity: 0.2;
+    transition: 0.3s;
+  }
+  .debug-toggle-btn:hover { opacity: 1; background: rgba(255,255,255,0.2); }
 
   @media (min-width: 768px) {
     #prompts-container { padding: 0 10rem; }
