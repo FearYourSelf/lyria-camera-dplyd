@@ -50,6 +50,12 @@ interface FavoriteVibeRecord {
   blobUrl?: string; // Runtime only
 }
 
+interface DebugLog {
+  timestamp: string;
+  message: string;
+  type: 'info' | 'error' | 'warn';
+}
+
 @customElement("lyria-camera")
 export class LyriaCamera extends LitElement {
   static styles = styles;
@@ -98,6 +104,10 @@ export class LyriaCamera extends LitElement {
   @state() private playingEchoId: string | null = null;
   private vibeAudioEl: HTMLAudioElement | null = null;
 
+  // Debugging Console
+  @state() private showDebugConsole = false;
+  @state() private debugLogs: DebugLog[] = [];
+
   @query("video") private videoElement!: HTMLVideoElement;
   @query("img#uploaded-image-el") private uploadedImageElement!: HTMLImageElement;
   @query("toast-message") private toastMessageElement!: ToastMessage;
@@ -123,6 +133,7 @@ export class LyriaCamera extends LitElement {
 
   async connectedCallback() {
     super.connectedCallback();
+    this.addLog("Initializing app...", 'info');
     await this.initDB();
     this.loadFavorites();
     this.ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
@@ -130,7 +141,10 @@ export class LyriaCamera extends LitElement {
 
     this.liveMusicHelper.addEventListener(
       "playback-state-changed",
-      (e: CustomEvent<PlaybackState>) => this.handlePlaybackStateChange(e),
+      (e: CustomEvent<PlaybackState>) => {
+        this.addLog(`Playback state: ${e.detail}`, 'info');
+        this.handlePlaybackStateChange(e);
+      },
     );
 
     this.liveMusicHelper.addEventListener("prompts-fresh", () => (this.promptsStale = false));
@@ -140,6 +154,7 @@ export class LyriaCamera extends LitElement {
     void this.updateCameraCapabilities();
 
     window.addEventListener('mousemove', this.handleMouseMove);
+    window.addEventListener('keydown', this.handleGlobalKeyDown);
   }
 
   disconnectedCallback() {
@@ -150,7 +165,25 @@ export class LyriaCamera extends LitElement {
     this.stopRecording();
     if (this.uiAudioCtx) this.uiAudioCtx.close();
     window.removeEventListener('mousemove', this.handleMouseMove);
+    window.removeEventListener('keydown', this.handleGlobalKeyDown);
     if (this.vibeAudioEl) { this.vibeAudioEl.pause(); }
+  }
+
+  private handleGlobalKeyDown = (e: KeyboardEvent) => {
+    if (e.ctrlKey && e.key === "'") {
+      e.preventDefault();
+      this.showDebugConsole = !this.showDebugConsole;
+      this.addLog(this.showDebugConsole ? "Debug console opened" : "Debug console closed", 'info');
+    }
+  };
+
+  private addLog(message: string, type: 'info' | 'error' | 'warn' = 'info') {
+    const log: DebugLog = {
+      timestamp: new Date().toLocaleTimeString(),
+      message,
+      type
+    };
+    this.debugLogs = [log, ...this.debugLogs.slice(0, 49)];
   }
 
   private async initDB() {
@@ -209,6 +242,7 @@ export class LyriaCamera extends LitElement {
     
     this.isCapturingVibe = true;
     this.captureProgress = 0;
+    this.addLog("Starting vibe capture (5m)", 'info');
     this.toastMessageElement.show("Recording a 5-minute Vibe composition...");
     
     const ctx = this.liveMusicHelper.audioContext;
@@ -234,6 +268,7 @@ export class LyriaCamera extends LitElement {
       await this.saveEchoToDB(newEcho);
       this.favorites = [newEcho, ...this.favorites];
       this.toastMessageElement.show("Composition saved to Vibes.");
+      this.addLog(`Vibe saved: ${name}`, 'info');
       this.playFeedbackSound('save');
       this.isCapturingVibe = false;
       if (this.recordingDestination) this.liveMusicHelper.disconnectRecorder(this.recordingDestination);
@@ -406,9 +441,15 @@ export class LyriaCamera extends LitElement {
     if (this.promptsLoading || this.page === "splash") return;
     this.playFeedbackSound('capture');
     this.promptsLoading = true;
+    this.addLog("Analyzing visual scene...", 'info');
     
     const snapshot = this.getStreamSnapshot();
-    if (!snapshot) { this.promptsLoading = false; this.startTimer(); return; }
+    if (!snapshot) { 
+      this.promptsLoading = false; 
+      this.startTimer(); 
+      this.addLog("Capture failed: No stream data", 'error');
+      return; 
+    }
     
     this.lastCapturedImage = snapshot;
     const base64ImageData = snapshot.split(",")[1];
@@ -417,6 +458,8 @@ export class LyriaCamera extends LitElement {
       const json = JSON.parse(response.text!);
       const newPrompts = (json.prompts as string[]).map(text => ({ text, weight: 1.0 }));
       
+      this.addLog(`New prompts generated: ${json.prompts.join(' | ')}`, 'info');
+
       if (this.appState === "pendingStart") {
         this.prompts = newPrompts;
         this.currentWeightedPrompts = newPrompts;
@@ -426,7 +469,8 @@ export class LyriaCamera extends LitElement {
       } else {
         this.startCrossfade(json.prompts);
       }
-    } catch (e) {
+    } catch (e: any) {
+      this.addLog(`AI analysis failed: ${e.message}`, 'error');
       this.dispatchError("AI analysis failed.");
     } finally {
       this.promptsLoading = false;
@@ -587,7 +631,10 @@ export class LyriaCamera extends LitElement {
   }
 
   private stopVisualizer() { if (this.visualizerRafId) cancelAnimationFrame(this.visualizerRafId); }
-  private dispatchError(m: string) { this.toastMessageElement.show(m); }
+  private dispatchError(m: string) { 
+    this.addLog(m, 'error');
+    this.toastMessageElement.show(m); 
+  }
   private ensureUiAudio() { if (!this.uiAudioCtx) this.uiAudioCtx = new AudioContext(); }
   private playFeedbackSound(t: string) {
     if (!this.uiAudioCtx) return;
@@ -627,10 +674,36 @@ export class LyriaCamera extends LitElement {
       <div id="ui-layer" role="main">
         ${this.renderPage(t)}
         ${this.settingsOpen ? this.renderSettings(t) : nothing}
+        ${this.showDebugConsole ? this.renderDebugConsole() : nothing}
       </div>
       <toast-message aria-live="polite"></toast-message>
       <input type="file" id="file-input" hidden @change=${this.handleFileChange} accept="image/*" aria-hidden="true" />
       ${this.activeTooltip ? html`<div class="tooltip-bubble ${this.tooltipSide}" style=${styleMap({ left: `${this.tooltipX}px`, top: `${this.tooltipY}px` })}>${this.activeTooltip}</div>` : nothing}
+    `;
+  }
+
+  private renderDebugConsole() {
+    return html`
+      <div class="debug-console glass">
+        <div class="debug-header">
+          <span>DEBUG CONSOLE (CTRL + ')</span>
+          <button @click=${() => this.debugLogs = []} class="debug-btn">Clear</button>
+          <button @click=${() => this.showDebugConsole = false} class="debug-btn">Close</button>
+        </div>
+        <div class="debug-body">
+          <div class="debug-state">
+            Page: <strong>${this.page}</strong> | 
+            AppState: <strong>${this.appState}</strong> | 
+            Playback: <strong>${this.playbackState}</strong>
+          </div>
+          ${this.debugLogs.map(log => html`
+            <div class="debug-log-line ${log.type}">
+              <span class="log-ts">[${log.timestamp}]</span>
+              <span class="log-msg">${log.message}</span>
+            </div>
+          `)}
+        </div>
+      </div>
     `;
   }
 

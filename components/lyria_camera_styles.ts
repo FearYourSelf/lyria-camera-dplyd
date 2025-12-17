@@ -297,6 +297,64 @@ export default css`
   #pip-container.visible { opacity: 1; transform: translateY(0); }
   #pip-container img { width: 100%; height: 100%; object-fit: cover; }
 
+  /* Debug Console Styles */
+  .debug-console {
+    position: fixed;
+    top: 20px;
+    right: 20px;
+    width: 400px;
+    height: 60vh;
+    z-index: 10000;
+    display: flex;
+    flex-direction: column;
+    padding: 0;
+    overflow: hidden;
+    font-family: 'Roboto Mono', monospace;
+    font-size: 11px;
+    border-radius: 12px;
+    pointer-events: auto;
+  }
+  .debug-header {
+    background: rgba(255,255,255,0.1);
+    padding: 10px 15px;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    border-bottom: 1px solid rgba(255,255,255,0.1);
+    font-weight: bold;
+    letter-spacing: 0.05em;
+  }
+  .debug-btn {
+    background: rgba(255,255,255,0.1);
+    border: none;
+    color: white;
+    padding: 4px 8px;
+    border-radius: 4px;
+    cursor: pointer;
+    font-size: 10px;
+  }
+  .debug-btn:hover { background: rgba(255,255,255,0.2); }
+  .debug-body {
+    flex: 1;
+    overflow-y: auto;
+    padding: 15px;
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    background: rgba(0,0,0,0.4);
+  }
+  .debug-state {
+    padding-bottom: 10px;
+    margin-bottom: 10px;
+    border-bottom: 1px solid rgba(255,255,255,0.1);
+    color: #0f0;
+  }
+  .debug-log-line { display: flex; gap: 8px; opacity: 0.8; }
+  .debug-log-line.error { color: #ff453a; opacity: 1; }
+  .debug-log-line.warn { color: #ffd60a; opacity: 1; }
+  .log-ts { opacity: 0.5; flex-shrink: 0; }
+  .log-msg { word-break: break-all; }
+
   @media (min-width: 768px) {
     #prompts-container { padding: 0 10rem; }
     #pip-container { right: 10rem; }
