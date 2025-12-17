@@ -7,7 +7,6 @@
 import {
   GoogleGenAI,
   type AudioChunk,
-  type LiveMusicFilteredPrompt,
   type LiveMusicServerMessage,
   type LiveMusicSession,
   type WeightedPrompt,
@@ -23,8 +22,7 @@ export class LiveMusicHelper extends EventTarget {
 
   private filteredPrompts = new Set<string>();
   private nextStartTime = 0;
-  private bufferTime = 1.5; // Reduced slightly for better responsiveness
-
+  
   public readonly audioContext: AudioContext;
   private outputNode: GainNode; 
   private volumeNode: GainNode; 
@@ -35,7 +33,8 @@ export class LiveMusicHelper extends EventTarget {
   private lastSentPrompts: WeightedPrompt[] = [];
   
   private retryCount = 0;
-  private maxRetries = 3;
+  private maxRetries = 5; // Increased for better resilience
+  private isAttemptingReconnect = false;
 
   constructor(
     private readonly apiKey: string,
@@ -73,7 +72,6 @@ export class LiveMusicHelper extends EventTarget {
   private async connect(): Promise<LiveMusicSession> {
     const ai = new GoogleGenAI({ apiKey: this.apiKey });
     
-    // Resume context BEFORE connecting to ensure hardware is ready
     if (this.audioContext.state === 'suspended') {
       await this.audioContext.resume();
     }
@@ -84,6 +82,7 @@ export class LiveMusicHelper extends EventTarget {
         callbacks: {
           onopen: () => {
             this.retryCount = 0;
+            this.isAttemptingReconnect = false;
             console.log("Lyria RealTime stream established.");
           },
           onmessage: async (e: LiveMusicServerMessage) => {
@@ -95,24 +94,25 @@ export class LiveMusicHelper extends EventTarget {
               await this.processAudioChunks(e.serverContent.audioChunks);
             }
           },
-          onclose: () => {
-            console.log("Lyria RealTime stream closed.");
-            if (this.playbackState !== "stopped") {
-              this.handleRetry();
+          onclose: (event: any) => {
+            console.log("Lyria RealTime stream closed.", event);
+            // If we are supposed to be playing, trigger recovery
+            if (this.playbackState !== "stopped" && !this.isAttemptingReconnect) {
+              this.handleRetry("Connection closed by server.");
             }
           },
           onerror: (e: any) => {
             console.error("Session Error:", e);
-            const isUnavailable = e?.message?.toLowerCase().includes("unavailable") || e?.message?.includes("503");
+            const errorMsg = e?.message || "Unknown socket error";
             
-            if (isUnavailable && this.retryCount < this.maxRetries) {
-               this.handleRetry();
-            } else {
+            // Any error during active playback should trigger a retry attempt
+            if (this.playbackState !== "stopped" && this.retryCount < this.maxRetries) {
+               this.handleRetry(`Socket error: ${errorMsg}`);
+            } else if (this.retryCount >= this.maxRetries) {
               this.stop();
-              const message = isUnavailable
-                ? "The music service is currently overloaded. Retrying failed. Please wait a few seconds."
-                : "A connection error occurred. Please restart the session.";
-              this.dispatchEvent(new CustomEvent("error", { detail: message }));
+              this.dispatchEvent(new CustomEvent("error", { 
+                detail: "Maximum reconnection attempts reached. Please check your connection." 
+              }));
             }
           },
         },
@@ -125,18 +125,31 @@ export class LiveMusicHelper extends EventTarget {
     }
   }
 
-  private handleRetry() {
+  private handleRetry(reason: string) {
+    if (this.isAttemptingReconnect) return;
+    this.isAttemptingReconnect = true;
+    
     this.retryCount++;
-    console.log(`Attempting reconnection ${this.retryCount}/${this.maxRetries}...`);
+    console.warn(`Reconnecting (${this.retryCount}/${this.maxRetries}): ${reason}`);
+    
     this.session = null;
     this.sessionPromise = null;
+    this.setPlaybackState("loading");
+
+    // Clean up nodes for a fresh start
+    this.nextStartTime = 0;
     
-    // Small delay before retry
     setTimeout(() => {
       if (this.playbackState !== "stopped") {
-        this.play().catch(console.error);
+        this.play().catch(err => {
+          console.error("Retry failed:", err);
+          this.isAttemptingReconnect = false;
+          // The next cycle or a manual click will try again
+        });
+      } else {
+        this.isAttemptingReconnect = false;
       }
-    }, 2000 * this.retryCount);
+    }, 1500 * this.retryCount);
   }
 
   private setPlaybackState(state: PlaybackState) {
@@ -150,8 +163,9 @@ export class LiveMusicHelper extends EventTarget {
     this.checkPromptFreshness(this.getChunkTexts(audioChunks));
 
     try {
+      const data = decode(audioChunks[0].data!);
       const audioBuffer = await decodeAudioData(
-        decode(audioChunks[0].data!),
+        data,
         this.audioContext,
         48000,
         2,
@@ -162,8 +176,9 @@ export class LiveMusicHelper extends EventTarget {
       source.connect(this.outputNode);
 
       const now = this.audioContext.currentTime;
-      if (this.nextStartTime < now) {
-        this.nextStartTime = now + 0.1; // Small buffer for immediate start
+      // If we drifted too far, reset to 'now'
+      if (this.nextStartTime < now - 0.5) {
+        this.nextStartTime = now + 0.05;
       }
 
       source.start(this.nextStartTime);
@@ -200,7 +215,7 @@ export class LiveMusicHelper extends EventTarget {
     this.prompts = prompts;
     if (this.activePrompts.length === 0 && this.playbackState !== "stopped") return;
     void this.setWeightedPromptsImmediate();
-  }, 500); // Throttled more aggressively for server stability
+  }, 800);
 
   private async setWeightedPromptsImmediate() {
     if (!this.session) return;
@@ -213,19 +228,34 @@ export class LiveMusicHelper extends EventTarget {
   }
 
   public async play() {
+    // If already connecting, wait for that promise
+    if (this.sessionPromise) {
+      await this.sessionPromise;
+      return;
+    }
+    
     if (this.session) return;
+    
     this.setPlaybackState("loading");
     
     try {
       this.sessionPromise = this.connect();
       this.session = await this.sessionPromise;
+      this.sessionPromise = null;
+      
       await this.setWeightedPromptsImmediate();
       this.session.play();
       
       this.outputNode.gain.setTargetAtTime(1, this.audioContext.currentTime, 0.1);
     } catch (e: any) {
-      this.stop();
-      throw e;
+      this.sessionPromise = null;
+      console.error("Play failed:", e);
+      if (this.retryCount < this.maxRetries) {
+        this.handleRetry("Initial play failed.");
+      } else {
+        this.stop();
+        throw e;
+      }
     }
   }
 
@@ -233,18 +263,21 @@ export class LiveMusicHelper extends EventTarget {
     this.setPlaybackState("stopped");
     this.nextStartTime = 0;
     this.retryCount = 0;
+    this.isAttemptingReconnect = false;
+    this.sessionPromise = null;
 
     if (this.session) {
       try {
         this.outputNode.gain.setTargetAtTime(0, this.audioContext.currentTime, 0.2);
         const s = this.session;
-        setTimeout(() => s.stop(), 300);
+        setTimeout(() => {
+          try { s.stop(); } catch(e) {}
+        }, 300);
       } catch (e) {
-        console.warn("Stop error:", e);
+        console.warn("Stop cleanup error:", e);
       }
     }
     
     this.session = null;
-    this.sessionPromise = null;
   }
 }

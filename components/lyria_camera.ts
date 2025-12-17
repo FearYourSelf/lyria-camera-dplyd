@@ -146,13 +146,16 @@ export class LyriaCamera extends LitElement {
     this.liveMusicHelper.addEventListener(
       "playback-state-changed",
       (e: CustomEvent<PlaybackState>) => {
-        this.addLog(`Playback state: ${e.detail}`, 'info');
+        this.addLog(`Music state: ${e.detail.toUpperCase()}`, e.detail === 'stopped' ? 'warn' : 'info');
         this.handlePlaybackStateChange(e);
       },
     );
 
     this.liveMusicHelper.addEventListener("prompts-fresh", () => (this.promptsStale = false));
-    this.liveMusicHelper.addEventListener("error", (e: CustomEvent<string>) => this.dispatchError(e.detail));
+    this.liveMusicHelper.addEventListener("error", (e: CustomEvent<string>) => {
+      this.addLog(`Music Stream Error: ${e.detail}`, 'error');
+      this.dispatchError(e.detail);
+    });
 
     this.supportsScreenShare = !!navigator.mediaDevices?.getDisplayMedia;
     void this.updateCameraCapabilities();
@@ -471,8 +474,8 @@ export class LyriaCamera extends LitElement {
       const json = JSON.parse(response.text!);
       const newPrompts = (json.prompts as string[]).map(text => ({ text, weight: 1.0 }));
       
-      this.addLog(`New prompts generated: ${json.prompts.join(' | ')}`, 'info');
-      this.analysisBackoffFactor = 0; // Success resets backoff
+      this.addLog(`New prompts generated. Updating music session...`, 'info');
+      this.analysisBackoffFactor = 0; 
 
       if (this.appState === "pendingStart") {
         this.prompts = newPrompts;
@@ -490,13 +493,13 @@ export class LyriaCamera extends LitElement {
       if (isRateLimit) {
         this.analysisBackoffFactor = Math.min(this.analysisBackoffFactor + 1, 6);
         this.isCoolingDown = true;
-        this.addLog(`Rate limit hit on ${GEMINI_MODEL}. Throttling requests...`, 'warn');
+        this.addLog(`Rate limit hit on ${GEMINI_MODEL}. Throttling...`, 'warn');
         this.toastMessageElement.show("AI is resting (Rate Limit). Resuming shortly...", 6000);
         
         setTimeout(() => {
           this.isCoolingDown = false;
           this.addLog("Cooldown period complete.", 'info');
-        }, 12000); // 12 second forced cooldown
+        }, 12000); 
       } else {
         this.addLog(`AI analysis failed: ${errorMsg}`, 'error');
         this.dispatchError("AI analysis failed.");
