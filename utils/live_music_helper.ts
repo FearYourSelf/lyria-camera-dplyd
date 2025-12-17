@@ -38,7 +38,7 @@ export class LiveMusicHelper extends EventTarget {
   private lastSentPrompts: WeightedPrompt[] = [];
 
   constructor(
-    private readonly ai: GoogleGenAI,
+    private readonly apiKey: string,
     private readonly model: string,
   ) {
     super();
@@ -78,7 +78,10 @@ export class LiveMusicHelper extends EventTarget {
   }
 
   private async connect(): Promise<LiveMusicSession> {
-    this.sessionPromise = (this.ai.live as any).music.connect({
+    // CRITICAL: Create a fresh instance right before connecting to avoid stale state
+    const ai = new GoogleGenAI({ apiKey: this.apiKey });
+    
+    this.sessionPromise = (ai.live as any).music.connect({
       model: this.model,
       callbacks: {
         onmessage: async (e: LiveMusicServerMessage) => {
@@ -99,6 +102,7 @@ export class LiveMusicHelper extends EventTarget {
         },
         onclose: () => console.log("Lyria RealTime stream closed."),
         onerror: (e: unknown) => {
+          console.error("Session Error:", e);
           this.stop();
           this.dispatchEvent(
             new CustomEvent("error", {
@@ -184,7 +188,6 @@ export class LiveMusicHelper extends EventTarget {
       });
   }
 
-  // Optimized throttle for fluid weight shifts
   public readonly setWeightedPrompts = throttle((prompts: WeightedPrompt[]) => {
     this.prompts = prompts;
 

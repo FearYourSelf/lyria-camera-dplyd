@@ -9,8 +9,7 @@ import { urlargs } from "./urlargs";
 
 export const MAX_CAPTURE_DIM = 256;
 export const IMAGE_MIME_TYPE = "image/png";
-// Fix: Use correct full model name for flash lite as per guidelines
-export const GEMINI_MODEL = "gemini-flash-lite-latest";
+export const GEMINI_MODEL = "gemini-3-flash-preview";
 
 export const INTERVAL_PRESETS: IntervalPreset[] = [
   {

@@ -106,7 +106,8 @@ export class LyriaCamera extends LitElement {
   async connectedCallback() {
     super.connectedCallback();
     this.ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
-    this.liveMusicHelper = new LiveMusicHelper(this.ai, "lyria-realtime-exp");
+    // Fix: Use the full prefixed model name and pass the key directly
+    this.liveMusicHelper = new LiveMusicHelper(process.env.API_KEY, "models/lyria-realtime-exp");
 
     this.liveMusicHelper.addEventListener(
       "playback-state-changed",
@@ -204,7 +205,7 @@ export class LyriaCamera extends LitElement {
     this.currentSource = "image";
     this.page = "main";
     this.imagePreviewSrc = null;
-    this.appState = "idle"; // Start paused as requested
+    this.appState = "idle"; 
     await (this as any).updateComplete;
   }
 
@@ -429,7 +430,6 @@ export class LyriaCamera extends LitElement {
       ctx.clearRect(0, 0, cvs.width, cvs.height);
       const time = performance.now() * 0.00015;
       
-      // Greyscale palette visualizer
       this.drawAurora(ctx, cvs, time, data, "rgba(255, 255, 255, 0.4)", 200);
       this.drawAurora(ctx, cvs, time * 1.5, data, "rgba(200, 200, 200, 0.3)", 150);
       this.drawAurora(ctx, cvs, time * 0.8, data, "rgba(100, 100, 100, 0.2)", 250);
