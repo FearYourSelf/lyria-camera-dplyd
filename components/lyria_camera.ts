@@ -126,7 +126,7 @@ export class LyriaCamera extends LitElement {
     await this.initDB();
     this.loadFavorites();
     this.ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
-    this.liveMusicHelper = new LiveMusicHelper(process.env.API_KEY, "models/lyria-realtime-exp");
+    this.liveMusicHelper = new LiveMusicHelper(process.env.API_KEY, "lyria-realtime-exp");
 
     this.liveMusicHelper.addEventListener(
       "playback-state-changed",

@@ -23,27 +23,26 @@ export class LiveMusicHelper extends EventTarget {
 
   private filteredPrompts = new Set<string>();
   private nextStartTime = 0;
-  private bufferTime = 2;
+  private bufferTime = 1.5; // Reduced slightly for better responsiveness
 
   public readonly audioContext: AudioContext;
-  public extraDestination: AudioNode | null = null;
-
   private outputNode: GainNode; 
   private volumeNode: GainNode; 
   public analyser: AnalyserNode; 
 
   private playbackState: PlaybackState = "stopped";
-
   private prompts: WeightedPrompt[] = [];
   private lastSentPrompts: WeightedPrompt[] = [];
+  
+  private retryCount = 0;
+  private maxRetries = 3;
 
   constructor(
     private readonly apiKey: string,
     private readonly model: string,
   ) {
     super();
-    this.prompts = [];
-    this.audioContext = new AudioContext({ sampleRate: 48000 });
+    this.audioContext = new (window.AudioContext || (window as any).webkitAudioContext)({ sampleRate: 48000 });
     
     this.outputNode = this.audioContext.createGain();
     this.volumeNode = this.audioContext.createGain();
@@ -51,7 +50,6 @@ export class LiveMusicHelper extends EventTarget {
     
     this.analyser.fftSize = 256;
     this.analyser.smoothingTimeConstant = 0.85;
-    
     this.volumeNode.gain.value = 0.8;
 
     this.outputNode.connect(this.volumeNode);
@@ -72,222 +70,181 @@ export class LiveMusicHelper extends EventTarget {
     this.volumeNode.disconnect(destination);
   }
 
-  private getSession(): Promise<LiveMusicSession> {
-    if (!this.sessionPromise) this.sessionPromise = this.connect();
-    return this.sessionPromise;
-  }
-
   private async connect(): Promise<LiveMusicSession> {
-    // CRITICAL: Create a fresh instance right before connecting to avoid stale state
     const ai = new GoogleGenAI({ apiKey: this.apiKey });
     
-    this.sessionPromise = (ai.live as any).music.connect({
-      model: this.model,
-      callbacks: {
-        onmessage: async (e: LiveMusicServerMessage) => {
-          if (e.filteredPrompt) {
-            this.filteredPrompts = new Set([
-              ...this.filteredPrompts,
-              e.filteredPrompt.text!,
-            ]);
-            this.dispatchEvent(
-              new CustomEvent<LiveMusicFilteredPrompt>("filtered-prompt", {
-                detail: e.filteredPrompt,
-              }),
-            );
-          }
-          if (e.serverContent?.audioChunks) {
-            await this.processAudioChunks(e.serverContent.audioChunks);
-          }
+    // Resume context BEFORE connecting to ensure hardware is ready
+    if (this.audioContext.state === 'suspended') {
+      await this.audioContext.resume();
+    }
+
+    try {
+      const connectPromise = (ai.live as any).music.connect({
+        model: this.model,
+        callbacks: {
+          onopen: () => {
+            this.retryCount = 0;
+            console.log("Lyria RealTime stream established.");
+          },
+          onmessage: async (e: LiveMusicServerMessage) => {
+            if (e.filteredPrompt) {
+              this.filteredPrompts.add(e.filteredPrompt.text!);
+              this.dispatchEvent(new CustomEvent("filtered-prompt", { detail: e.filteredPrompt }));
+            }
+            if (e.serverContent?.audioChunks) {
+              await this.processAudioChunks(e.serverContent.audioChunks);
+            }
+          },
+          onclose: () => {
+            console.log("Lyria RealTime stream closed.");
+            if (this.playbackState !== "stopped") {
+              this.handleRetry();
+            }
+          },
+          onerror: (e: any) => {
+            console.error("Session Error:", e);
+            const isUnavailable = e?.message?.toLowerCase().includes("unavailable") || e?.message?.includes("503");
+            
+            if (isUnavailable && this.retryCount < this.maxRetries) {
+               this.handleRetry();
+            } else {
+              this.stop();
+              const message = isUnavailable
+                ? "The music service is currently overloaded. Retrying failed. Please wait a few seconds."
+                : "A connection error occurred. Please restart the session.";
+              this.dispatchEvent(new CustomEvent("error", { detail: message }));
+            }
+          },
         },
-        onclose: () => console.log("Lyria RealTime stream closed."),
-        onerror: (e: unknown) => {
-          console.error("Session Error:", e);
-          this.stop();
-          this.dispatchEvent(
-            new CustomEvent("error", {
-              detail: "Connection error, please restart audio.",
-            }),
-          );
-        },
-      },
-    });
-    return this.sessionPromise;
+      });
+      
+      return await connectPromise;
+    } catch (err) {
+      this.sessionPromise = null;
+      throw err;
+    }
+  }
+
+  private handleRetry() {
+    this.retryCount++;
+    console.log(`Attempting reconnection ${this.retryCount}/${this.maxRetries}...`);
+    this.session = null;
+    this.sessionPromise = null;
+    
+    // Small delay before retry
+    setTimeout(() => {
+      if (this.playbackState !== "stopped") {
+        this.play().catch(console.error);
+      }
+    }, 2000 * this.retryCount);
   }
 
   private setPlaybackState(state: PlaybackState) {
     this.playbackState = state;
-    this.dispatchEvent(
-      new CustomEvent("playback-state-changed", { detail: state }),
-    );
+    this.dispatchEvent(new CustomEvent("playback-state-changed", { detail: state }));
   }
 
   private async processAudioChunks(audioChunks: AudioChunk[]) {
-    if (this.playbackState === "paused" || this.playbackState === "stopped") {
-      return;
-    }
+    if (this.playbackState === "paused" || this.playbackState === "stopped") return;
 
     this.checkPromptFreshness(this.getChunkTexts(audioChunks));
 
-    const audioBuffer = await decodeAudioData(
-      decode(audioChunks[0].data!),
-      this.audioContext,
-      48000,
-      2,
-    );
+    try {
+      const audioBuffer = await decodeAudioData(
+        decode(audioChunks[0].data!),
+        this.audioContext,
+        48000,
+        2,
+      );
 
-    const source = this.audioContext.createBufferSource();
-    source.buffer = audioBuffer;
-    source.connect(this.outputNode);
+      const source = this.audioContext.createBufferSource();
+      source.buffer = audioBuffer;
+      source.connect(this.outputNode);
 
-    if (this.nextStartTime === 0) {
-      this.nextStartTime = this.audioContext.currentTime + this.bufferTime;
-      setTimeout(() => {
+      const now = this.audioContext.currentTime;
+      if (this.nextStartTime < now) {
+        this.nextStartTime = now + 0.1; // Small buffer for immediate start
+      }
+
+      source.start(this.nextStartTime);
+      this.nextStartTime += audioBuffer.duration;
+
+      if (this.playbackState === "loading") {
         this.setPlaybackState("playing");
-      }, this.bufferTime * 1000);
+      }
+    } catch (e) {
+      console.error("Audio processing error:", e);
     }
-
-    if (this.nextStartTime < this.audioContext.currentTime) {
-      this.setPlaybackState("loading");
-      this.nextStartTime = 0;
-      return;
-    }
-
-    source.start(this.nextStartTime);
-    this.nextStartTime += audioBuffer.duration;
   }
 
   private getChunkTexts(chunks: AudioChunk[]): string[] {
-    const chunkPrompts =
-      chunks[0].sourceMetadata?.clientContent?.weightedPrompts;
-    if (!chunkPrompts) {
-      return [];
-    }
-    return chunkPrompts.map((p) => p.text);
+    const chunkPrompts = chunks[0].sourceMetadata?.clientContent?.weightedPrompts;
+    return chunkPrompts ? chunkPrompts.map((p: any) => p.text) : [];
   }
 
   private checkPromptFreshness(texts: string[]) {
     const sentPromptTexts = this.lastSentPrompts.map((p) => p.text);
-    const allMatch = sentPromptTexts.every((text) => texts.includes(text));
-
-    if (!allMatch) {
-      return;
+    if (sentPromptTexts.length > 0 && sentPromptTexts.every((text) => texts.includes(text))) {
+      this.dispatchEvent(new CustomEvent("prompts-fresh"));
+      this.lastSentPrompts = [];
     }
-
-    this.dispatchEvent(new CustomEvent("prompts-fresh"));
-    this.lastSentPrompts = [];
   }
 
   public get activePrompts(): WeightedPrompt[] {
     return this.prompts
-      .filter((p) => {
-        return !this.filteredPrompts.has(p.text) && p.weight > 0;
-      })
-      .map((p) => {
-        return { text: p.text, weight: p.weight };
-      });
+      .filter((p) => !this.filteredPrompts.has(p.text) && p.weight > 0)
+      .map((p) => ({ text: p.text, weight: p.weight }));
   }
 
   public readonly setWeightedPrompts = throttle((prompts: WeightedPrompt[]) => {
     this.prompts = prompts;
-
-    if (this.activePrompts.length === 0 && this.playbackState !== "stopped") {
-      this.dispatchEvent(
-        new CustomEvent("error", {
-          detail: "Prompt context must be set before playback.",
-        }),
-      );
-      return;
-    }
-
-    this.checkPromptFreshness(prompts.map((p) => p.text));
+    if (this.activePrompts.length === 0 && this.playbackState !== "stopped") return;
     void this.setWeightedPromptsImmediate();
-  }, 60);
+  }, 500); // Throttled more aggressively for server stability
 
   private async setWeightedPromptsImmediate() {
     if (!this.session) return;
     try {
       this.lastSentPrompts = this.activePrompts;
-      await this.session.setWeightedPrompts({
-        weightedPrompts: this.activePrompts,
-      });
-    } catch (e: unknown) {
-      this.dispatchEvent(
-        new CustomEvent("error", { detail: (e as Error).message }),
-      );
+      await this.session.setWeightedPrompts({ weightedPrompts: this.activePrompts });
+    } catch (e: any) {
+      console.warn("Failed to set prompts:", e);
     }
   }
 
   public async play() {
+    if (this.session) return;
     this.setPlaybackState("loading");
-    this.session = await this.getSession();
-
-    void this.setWeightedPromptsImmediate();
-
-    await this.audioContext.resume();
-    this.session.play();
     
-    this.outputNode.gain.setValueAtTime(0, this.audioContext.currentTime);
-    this.outputNode.gain.linearRampToValueAtTime(
-      1,
-      this.audioContext.currentTime + 0.1,
-    );
-  }
-
-  public pause() {
-    if (this.session) this.session.pause();
-    this.setPlaybackState("paused");
-    
-    this.outputNode.gain.setValueAtTime(1, this.audioContext.currentTime);
-    this.outputNode.gain.linearRampToValueAtTime(
-      0,
-      this.audioContext.currentTime + 0.1,
-    );
-    this.nextStartTime = 0;
-    
-    const oldNode = this.outputNode;
-    setTimeout(() => { oldNode.disconnect() }, 200);
-    
-    this.outputNode = this.audioContext.createGain();
-    this.outputNode.connect(this.volumeNode);
+    try {
+      this.sessionPromise = this.connect();
+      this.session = await this.sessionPromise;
+      await this.setWeightedPromptsImmediate();
+      this.session.play();
+      
+      this.outputNode.gain.setTargetAtTime(1, this.audioContext.currentTime, 0.1);
+    } catch (e: any) {
+      this.stop();
+      throw e;
+    }
   }
 
   public stop() {
     this.setPlaybackState("stopped");
     this.nextStartTime = 0;
+    this.retryCount = 0;
 
     if (this.session) {
-      const fadeDuration = 0.5;
-      this.outputNode.gain.cancelScheduledValues(this.audioContext.currentTime);
-      this.outputNode.gain.setValueAtTime(
-        this.outputNode.gain.value,
-        this.audioContext.currentTime,
-      );
-      this.outputNode.gain.linearRampToValueAtTime(
-        0,
-        this.audioContext.currentTime + fadeDuration,
-      );
-
-      const sessionToStop = this.session;
-      setTimeout(() => {
-        sessionToStop.stop();
-      }, fadeDuration * 1000);
+      try {
+        this.outputNode.gain.setTargetAtTime(0, this.audioContext.currentTime, 0.2);
+        const s = this.session;
+        setTimeout(() => s.stop(), 300);
+      } catch (e) {
+        console.warn("Stop error:", e);
+      }
     }
+    
     this.session = null;
     this.sessionPromise = null;
-  }
-
-  public async playPause() {
-    switch (this.playbackState) {
-      case "playing":
-        return this.pause();
-      case "paused":
-      case "stopped":
-        return this.play();
-      case "loading":
-        return this.stop();
-      default:
-        console.error(`Unknown playback state: ${this.playbackState}`);
-    }
   }
 }
