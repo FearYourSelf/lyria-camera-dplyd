@@ -74,7 +74,7 @@ export default css`
 
   #video-container.cooling video, #video-container.cooling img#uploaded-image-el {
     opacity: 0.15;
-    filter: grayscale(1) brightness(0.5);
+    filter: grayscale(0.8) brightness(0.4);
   }
 
   @keyframes pulseView {
@@ -94,7 +94,8 @@ export default css`
   }
 
   .analysis-overlay.cooldown {
-    background: rgba(0, 0, 0, 0.6);
+    background: rgba(0, 0, 0, 0.5);
+    backdrop-filter: blur(4px);
   }
 
   .analysis-status {
@@ -211,7 +212,7 @@ export default css`
   .play-btn.playing { background: rgba(255,255,255,0.1); color: white; border: 2px solid white; }
   .play-btn:active { transform: scale(0.9); }
 
-  .status-pill { background: rgba(255, 255, 255, 0.1); padding: 6px 14px; border-radius: 20px; font-size: 0.6rem; font-weight: 800; text-transform: uppercase; letter-spacing: 0.15em; opacity: 0.6; }
+  .status-pill { background: rgba(255, 255, 255, 0.05); padding: 6px 14px; border-radius: 20px; font-size: 0.6rem; font-weight: 800; text-transform: uppercase; letter-spacing: 0.15em; opacity: 0.6; }
   .volume-bar { display: flex; align-items: center; gap: 0.75rem; width: 100%; max-width: 220px; opacity: 0.6; }
 
   .sheet {
@@ -237,7 +238,6 @@ export default css`
   .sheet-header { flex-shrink: 0; margin-bottom: 2rem; }
   .sheet-header h3 { margin: 0; font-size: 1.4rem; letter-spacing: -0.02em; }
 
-  /* PREVIEW SHEET IMAGE FIX: Uses robust containment */
   .preview-sheet { display: flex; flex-direction: column; }
   .preview-image-container {
     flex: 1;
@@ -311,8 +311,8 @@ export default css`
     position: fixed;
     top: 20px;
     right: 20px;
-    width: 400px;
-    height: 60vh;
+    width: 420px;
+    height: 65vh;
     z-index: 10000;
     display: flex;
     flex-direction: column;
@@ -320,58 +320,62 @@ export default css`
     overflow: hidden;
     font-family: 'Roboto Mono', monospace;
     font-size: 11px;
-    border-radius: 12px;
+    border-radius: 16px;
     pointer-events: auto;
+    box-shadow: 0 20px 80px rgba(0,0,0,0.8);
   }
   .debug-header {
     background: rgba(255,255,255,0.1);
-    padding: 10px 15px;
+    padding: 12px 18px;
     display: flex;
     justify-content: space-between;
     align-items: center;
     border-bottom: 1px solid rgba(255,255,255,0.1);
     font-weight: bold;
     letter-spacing: 0.05em;
+    text-transform: uppercase;
   }
   .debug-btn {
-    background: rgba(255,255,255,0.1);
+    background: rgba(255,255,255,0.08);
     border: none;
     color: white;
-    padding: 4px 8px;
-    border-radius: 4px;
+    padding: 6px 12px;
+    border-radius: 6px;
     cursor: pointer;
     font-size: 10px;
+    transition: 0.2s;
   }
   .debug-btn:hover { background: rgba(255,255,255,0.2); }
   .debug-body {
     flex: 1;
     overflow-y: auto;
-    padding: 15px;
+    padding: 18px;
     display: flex;
     flex-direction: column;
-    gap: 4px;
-    background: rgba(0,0,0,0.4);
+    gap: 6px;
+    background: rgba(0,0,0,0.6);
   }
   .debug-state {
-    padding-bottom: 10px;
-    margin-bottom: 10px;
+    padding-bottom: 12px;
+    margin-bottom: 12px;
     border-bottom: 1px solid rgba(255,255,255,0.1);
-    color: #0f0;
+    color: #00ff88;
   }
-  .debug-log-line { display: flex; gap: 8px; opacity: 0.8; }
+  .debug-log-line { display: flex; gap: 10px; opacity: 0.8; line-height: 1.4; }
   .debug-log-line.error { color: #ff453a; opacity: 1; }
   .debug-log-line.warn { color: #ffd60a; opacity: 1; }
-  .log-ts { opacity: 0.5; flex-shrink: 0; }
+  .log-ts { opacity: 0.4; flex-shrink: 0; }
   .log-msg { word-break: break-all; }
 
   .debug-toggle-btn {
     position: fixed;
-    bottom: 10px;
-    left: 10px;
-    width: 24px;
-    height: 24px;
-    border-radius: 4px;
-    background: rgba(255,255,255,0.05);
+    bottom: 20px;
+    left: 20px;
+    width: 32px;
+    height: 32px;
+    border-radius: 8px;
+    background: rgba(20, 20, 20, 0.4);
+    backdrop-filter: blur(20px);
     border: 1px solid rgba(255,255,255,0.1);
     color: white;
     display: flex;
@@ -379,10 +383,10 @@ export default css`
     justify-content: center;
     cursor: pointer;
     z-index: 10001;
-    opacity: 0.2;
-    transition: 0.3s;
+    opacity: 0.5;
+    transition: 0.3s cubic-bezier(0.19, 1, 0.22, 1);
   }
-  .debug-toggle-btn:hover { opacity: 1; background: rgba(255,255,255,0.2); }
+  .debug-toggle-btn:hover { opacity: 1; background: rgba(255,255,255,0.2); transform: translateY(-2px); }
 
   @media (min-width: 768px) {
     #prompts-container { padding: 0 10rem; }

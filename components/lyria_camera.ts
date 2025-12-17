@@ -137,7 +137,7 @@ export class LyriaCamera extends LitElement {
 
   async connectedCallback() {
     super.connectedCallback();
-    this.addLog("Initializing app...", 'info');
+    this.addLog(`Sonar Initializing with ${GEMINI_MODEL}`, 'info');
     await this.initDB();
     this.loadFavorites();
     this.ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
@@ -429,8 +429,8 @@ export class LyriaCamera extends LitElement {
     this.stopTimer();
     if (this.intervalPreset.captureSeconds === 0) return;
     
-    // Add extra buffer if we just hit a rate limit
-    const backoffMs = this.analysisBackoffFactor * 5000;
+    // Exponential backoff to respect rate limits
+    const backoffMs = this.analysisBackoffFactor * 10000;
     this.nextCaptureTime = performance.now() + (this.intervalPreset.captureSeconds * 1000) + backoffMs;
     this.tick();
   }
@@ -472,7 +472,7 @@ export class LyriaCamera extends LitElement {
       const newPrompts = (json.prompts as string[]).map(text => ({ text, weight: 1.0 }));
       
       this.addLog(`New prompts generated: ${json.prompts.join(' | ')}`, 'info');
-      this.analysisBackoffFactor = 0; // Reset backoff on success
+      this.analysisBackoffFactor = 0; // Success resets backoff
 
       if (this.appState === "pendingStart") {
         this.prompts = newPrompts;
@@ -488,15 +488,15 @@ export class LyriaCamera extends LitElement {
       const isRateLimit = errorMsg.includes("429") || errorMsg.includes("Too Many Requests") || errorMsg.includes("rate limit");
       
       if (isRateLimit) {
-        this.analysisBackoffFactor = Math.min(this.analysisBackoffFactor + 1, 5);
+        this.analysisBackoffFactor = Math.min(this.analysisBackoffFactor + 1, 6);
         this.isCoolingDown = true;
-        this.addLog(`Rate limit hit on ${GEMINI_MODEL}. Entering cooldown...`, 'warn');
-        this.toastMessageElement.show("AI is resting (Rate Limit). Retrying in a few seconds...", 5000);
+        this.addLog(`Rate limit hit on ${GEMINI_MODEL}. Throttling requests...`, 'warn');
+        this.toastMessageElement.show("AI is resting (Rate Limit). Resuming shortly...", 6000);
         
         setTimeout(() => {
           this.isCoolingDown = false;
-          this.addLog("Cooldown finished.", 'info');
-        }, 8000);
+          this.addLog("Cooldown period complete.", 'info');
+        }, 12000); // 12 second forced cooldown
       } else {
         this.addLog(`AI analysis failed: ${errorMsg}`, 'error');
         this.dispatchError("AI analysis failed.");
@@ -699,7 +699,7 @@ export class LyriaCamera extends LitElement {
       <div id="video-container" aria-hidden="true" class=${classMap({ analyzing: this.promptsLoading, cooling: this.isCoolingDown })}>
         ${this.currentSource === "image" ? html`<img id="uploaded-image-el" alt="Uploaded source" src=${this.uploadedImageSrc!} />` : html`<video playsinline muted style=${styleMap({transform: this.isVideoFlipped ? "scaleX(-1)" : "none"})}></video>`}
         ${this.promptsLoading ? html`<div class="analysis-overlay"><div class="scanline"></div><div class="analysis-status">${t.synthesizing}</div></div>` : nothing}
-        ${this.isCoolingDown ? html`<div class="analysis-overlay cooldown"><div class="analysis-status" style="background: #ff453a; color: white;">AI OVERLOAD - COOLING DOWN</div></div>` : nothing}
+        ${this.isCoolingDown ? html`<div class="analysis-overlay cooldown"><div class="analysis-status" style="background: #ff453a; color: white; border: 2px solid white;">AI OVERLOAD - COOLING DOWN</div></div>` : nothing}
       </div>
       <canvas id="visualizer" aria-hidden="true"></canvas>
       <div id="ui-layer" role="main">
@@ -711,8 +711,8 @@ export class LyriaCamera extends LitElement {
       <input type="file" id="file-input" hidden @change=${this.handleFileChange} accept="image/*" aria-hidden="true" />
       ${this.activeTooltip ? html`<div class="tooltip-bubble ${this.tooltipSide}" style=${styleMap({ left: `${this.tooltipX}px`, top: `${this.tooltipY}px` })}>${this.activeTooltip}</div>` : nothing}
       
-      <!-- Persistent Debug Toggle -->
-      <button class="debug-toggle-btn" @click=${this.toggleDebugConsole} aria-label="Toggle Debug Console">
+      <!-- Persistent Debug Toggle Button -->
+      <button class="debug-toggle-btn" @click=${this.toggleDebugConsole} aria-label="Open Console">
         <span class="material-icons-round" style="font-size: 16px;">terminal</span>
       </button>
     `;
@@ -722,17 +722,17 @@ export class LyriaCamera extends LitElement {
     return html`
       <div class="debug-console glass">
         <div class="debug-header">
-          <span>DEBUG CONSOLE (CTRL + ')</span>
-          <button @click=${() => this.debugLogs = []} class="debug-btn">Clear</button>
-          <button @click=${() => this.showDebugConsole = false} class="debug-btn">Close</button>
+          <span>DEBUG CONSOLE</span>
+          <div style="display:flex; gap:8px;">
+            <button @click=${() => this.debugLogs = []} class="debug-btn">Clear</button>
+            <button @click=${() => this.showDebugConsole = false} class="debug-btn">✕</button>
+          </div>
         </div>
         <div class="debug-body">
           <div class="debug-state">
             Model: <strong>${GEMINI_MODEL}</strong> |
-            Page: <strong>${this.page}</strong> | 
-            AppState: <strong>${this.appState}</strong> | 
-            Playback: <strong>${this.playbackState}</strong> |
-            Backoff: <strong>${this.analysisBackoffFactor}</strong>
+            Backoff: <strong>${this.analysisBackoffFactor}</strong> |
+            State: <strong>${this.appState}</strong>
           </div>
           ${this.debugLogs.map(log => html`
             <div class="debug-log-line ${log.type}">
@@ -798,7 +798,7 @@ export class LyriaCamera extends LitElement {
 
       <div id="prompts-container" role="list" aria-label="Active musical prompts">
         <div class="prompts-actions">
-           <div style="width: 36px"></div> <!-- Spacing to balance the shuffle button -->
+           <div style="width: 36px"></div> 
            <button class="icon-button mini" @click=${() => this.randomizeWeights()} @mouseenter=${() => this.showTooltip("Randomize vibe weights")} @mouseleave=${this.hideTooltip} aria-label="Randomize weights"><span class="material-icons-round" style="font-size:18px;" aria-hidden="true">shuffle</span></button>
         </div>
         ${this.prompts.map((p, i) => html`
@@ -816,7 +816,7 @@ export class LyriaCamera extends LitElement {
 
       <div id="controls-container">
         ${this.isCapturingVibe ? html`<div class="progress-container mini"><div class="progress-bar-fill" style="width: ${this.captureProgress}%"></div></div>` : nothing}
-        <div class="status-pill" role="status" aria-live="polite" style=${styleMap({color: this.isCoolingDown ? '#ff453a' : 'inherit'})}>${this.getStatusText(t)}</div>
+        <div class="status-pill" role="status" aria-live="polite" style=${styleMap({color: this.isCoolingDown ? '#ff453a' : 'inherit', border: this.isCoolingDown ? '1px solid #ff453a' : 'none'})}>${this.getStatusText(t)}</div>
         <div class="main-playback">
           <button class="icon-button" @click=${this.startVibeCapture} @mouseenter=${() => this.showTooltip("Capture 5min Vibe")} @mouseleave=${this.hideTooltip} aria-label="Capture vibe" style=${styleMap({background: this.isCapturingVibe ? 'white' : ''})}>
             <span class="material-icons-round" style=${styleMap({color: this.isCapturingVibe ? 'black' : 'white'})} aria-hidden="true">${this.isCapturingVibe ? 'graphic_eq' : 'bookmark_add'}</span>
@@ -824,7 +824,7 @@ export class LyriaCamera extends LitElement {
           <button class="play-btn ${this.appState !== 'idle' ? 'playing' : ''}" @click=${this.handlePlayPause} @mouseenter=${() => this.showTooltip(this.appState !== 'idle' ? t.pauseTooltip : t.playTooltip)} @mouseleave=${this.hideTooltip}>
             <span class="material-icons-round" style="font-size: 36px;" aria-hidden="true">${this.appState !== 'idle' ? 'pause' : 'play_arrow'}</span>
           </button>
-          <button class="icon-button" @click=${() => this.captureAndGenerate()} ?disabled=${this.isCoolingDown} @mouseenter=${() => this.showTooltip(this.isCoolingDown ? "AI Cooling Down..." : t.captureTooltip)} @mouseleave=${this.hideTooltip} style=${styleMap({opacity: this.isCoolingDown ? '0.2' : '1'})}>
+          <button class="icon-button" @click=${() => this.captureAndGenerate()} ?disabled=${this.isCoolingDown} @mouseenter=${() => this.showTooltip(this.isCoolingDown ? "AI Overload - Wait" : t.captureTooltip)} @mouseleave=${this.hideTooltip} style=${styleMap({opacity: this.isCoolingDown ? '0.2' : '1'})}>
             <span class="material-icons-round" aria-hidden="true">camera</span>
           </button>
         </div>
